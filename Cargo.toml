@@ -6,7 +6,7 @@ authors = ["Yuri Iozzelli <y.iozzelli@gmail.com>"]
 categories = ["embedded", "hardware-support", "no-std"]
 keywords = ["embedded-hal-driver", "display", "LCD"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/yuri91/ili9341-rs"
+repository = "https://github.com/gabrielzach/ili9341-rs"
 edition = "2018"
 
 
@@ -15,7 +15,7 @@ embedded-hal = "0.2.3"
 
 [dependencies.embedded-graphics]
 optional = true
-version = "=0.6.0-beta.1"
+version = "0.5.2"
 
 [features]
 default = ["graphics"]
