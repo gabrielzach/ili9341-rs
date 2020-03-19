@@ -55,6 +55,7 @@ pub enum Orientation {
     PortraitFlipped,
     Landscape,
     LandscapeFlipped,
+    LandscapeMirrored, // used for M5Stack
 }
 
 /// There are two method for drawing to the screen:
@@ -163,13 +164,13 @@ where
     fn hard_reset<DELAY: DelayMs<u16>>(&mut self, delay: &mut DELAY) -> Result<(), PinE> {
         // set high if previously low
         self.reset.set_high()?;
-        delay.delay_ms(200);
+        delay.delay_ms(120);
         // set low for reset
         self.reset.set_low()?;
-        delay.delay_ms(200);
+        delay.delay_ms(120);
         // set high for normal operation
         self.reset.set_high()?;
-        delay.delay_ms(200);
+        delay.delay_ms(120);
         Ok(())
     }
 
@@ -268,6 +269,19 @@ where
                 self.height = WIDTH;
                 self.command(Command::MemoryAccessControl, &[0x40 | 0x80 | 0x20 | 0x08])
             }
+            Orientation::LandscapeMirrored => {
+                self.width = HEIGHT;
+                self.height = WIDTH;
+                self.command(Command::MemoryAccessControl, &[0x08])
+            }
+        }
+    }
+
+    /// Set to invert colors (use inverted = true with M5Stack)
+    pub fn set_inverted(&mut self, inverted: bool) -> Result<(), IFACE::Error> {
+        match inverted {
+            false => self.command(Command::InvertOff, &[]),
+            true => self.command(Command::InvertOn, &[])
         }
     }
 
@@ -311,4 +325,7 @@ enum Command {
     ColumnAddressSet = 0x2a,
     PageAddressSet = 0x2b,
     MemoryWrite = 0x2c,
+    InvertOff = 0x20,
+    InvertOn = 0x21,
+
 }
