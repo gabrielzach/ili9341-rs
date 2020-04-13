@@ -94,29 +94,4 @@ where
         Ok(())
     }
 
-    fn write_iter(
-        &mut self,
-        command: u8,
-        data: impl IntoIterator<Item = u16>,
-    ) -> Result<(), Self::Error> {
-        self.csx.set_low().map_err(Error::OutputPin)?;
-        self.rdx.set_high().map_err(Error::OutputPin)?;
-        self.dcx.set_low().map_err(Error::OutputPin)?;
-        self.wrx.set_low().map_err(Error::OutputPin)?;
-
-        self.set_data_bus(command)?;
-        self.wrx.set_high().map_err(Error::OutputPin)?;
-
-        self.dcx.set_high().map_err(Error::OutputPin)?;
-        for val in data.into_iter() {
-            for b in &val.to_be_bytes() {
-                self.wrx.set_low().map_err(Error::OutputPin)?;
-                self.set_data_bus(*b)?;
-                self.wrx.set_high().map_err(Error::OutputPin)?;
-            }
-        }
-
-        self.csx.set_high().map_err(Error::OutputPin)?;
-        Ok(())
-    }
 }

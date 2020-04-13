@@ -14,6 +14,7 @@ pub struct SpiInterface<SPI, CS, DC> {
     spi: SPI,
     cs: CS,
     dc: DC,
+    max_transfer_size: usize,
 }
 
 impl<SPI, CS, DC, SpiE, PinE> SpiInterface<SPI, CS, DC>
@@ -22,8 +23,8 @@ where
     CS: OutputPin<Error = PinE>,
     DC: OutputPin<Error = PinE>,
 {
-    pub fn new(spi: SPI, cs: CS, dc: DC) -> Self {
-        Self { spi, cs, dc }
+    pub fn new(spi: SPI, cs: CS, dc: DC, max_transfer_size: usize) -> Self {
+        Self { spi, cs, dc, max_transfer_size }
     }
 }
 
@@ -42,28 +43,13 @@ where
         self.spi.write(&[command]).map_err(Error::Interface)?;
 
         self.dc.set_high().map_err(Error::OutputPin)?;
-        self.spi.write(data).map_err(Error::Interface)?;
 
-        self.cs.set_high().map_err(Error::OutputPin)?;
-        Ok(())
-    }
-
-    fn write_iter(
-        &mut self,
-        command: u8,
-        data: impl IntoIterator<Item = u16>,
-    ) -> Result<(), Self::Error> {
-        self.cs.set_low().map_err(Error::OutputPin)?;
-
-        self.dc.set_low().map_err(Error::OutputPin)?;
-        self.spi.write(&[command]).map_err(Error::Interface)?;
-
-        self.dc.set_high().map_err(Error::OutputPin)?;
-        for w in data.into_iter() {
-            self.spi.write(&w.to_be_bytes()).map_err(Error::Interface)?;
+        for chunk in data.chunks(self.max_transfer_size) {
+            self.spi.write(&chunk).map_err(Error::Interface)?;
         }
 
         self.cs.set_high().map_err(Error::OutputPin)?;
         Ok(())
     }
+
 }

@@ -1,5 +1,5 @@
 [package]
-name = "ili9341"
+name = "ili9341-buffered"
 version = "0.3.0-beta.1"
 description = "A platform agnostic driver to interface with the ILI9341 (ald ILI9340C) TFT LCD display"
 authors = ["Yuri Iozzelli <y.iozzelli@gmail.com>"]

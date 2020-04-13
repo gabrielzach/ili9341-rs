@@ -20,22 +20,15 @@ pub trait Interface {
 
     /// Sends a command with a sequence of 8-bit arguments
     ///
-    /// Mostly used for sending configuration commands
+    /// Mostly used for sending configuration commands and flushing the framebuffer
     fn write(&mut self, command: u8, data: &[u8]) -> Result<(), Self::Error>;
 
-    /// Sends a command with a sequence of 16-bit data words
-    ///
-    /// Mostly used for sending MemoryWrite command and other commands
-    /// with 16-bit arguments
-    fn write_iter(
-        &mut self,
-        command: u8,
-        data: impl IntoIterator<Item = u16>,
-    ) -> Result<(), Self::Error>;
 }
 
 const WIDTH: usize = 240;
 const HEIGHT: usize = 320;
+
+pub const BUFFER_SIZE: usize = WIDTH * HEIGHT * 2;
 
 #[derive(Debug)]
 pub enum Error<IfaceE, PinE> {
@@ -74,14 +67,15 @@ pub enum Orientation {
 /// - As soon as a pixel is received, an internal counter is incremented,
 ///   and the next word will fill the next pixel (the adjacent on the right, or
 ///   the first of the next row if the row ended)
-pub struct Ili9341<IFACE, RESET> {
+pub struct Ili9341<'a, IFACE, RESET> {
     interface: IFACE,
     reset: RESET,
     width: usize,
     height: usize,
+    buffer: &'a mut [u8; BUFFER_SIZE],
 }
 
-impl<SpiE, PinE, SPI, CS, DC, RESET> Ili9341<SpiInterface<SPI, CS, DC>, RESET>
+impl<'a, SpiE, PinE, SPI, CS, DC, RESET> Ili9341<'a, SpiInterface<SPI, CS, DC>, RESET>
 where
     SPI: Transfer<u8, Error = SpiE> + Write<u8, Error = SpiE>,
     CS: OutputPin<Error = PinE>,
@@ -94,16 +88,18 @@ where
         dc: DC,
         reset: RESET,
         delay: &mut DELAY,
+        max_transfer_size: usize,
+        buffer: &'a mut [u8; BUFFER_SIZE],
     ) -> Result<Self, Error<SpiE, PinE>> {
-        let interface = SpiInterface::new(spi, cs, dc);
-        Self::new(interface, reset, delay).map_err(|e| match e {
+        let interface = SpiInterface::new(spi, cs, dc, max_transfer_size);
+        Self::new(interface, reset, delay, buffer).map_err(|e| match e {
             Error::Interface(inner) => inner,
             Error::OutputPin(inner) => Error::OutputPin(inner),
         })
     }
 }
 
-impl<IfaceE, PinE, IFACE, RESET> Ili9341<IFACE, RESET>
+impl<'a, IfaceE, PinE, IFACE, RESET> Ili9341<'a, IFACE, RESET>
 where
     IFACE: Interface<Error = IfaceE>,
     RESET: OutputPin<Error = PinE>,
@@ -112,12 +108,17 @@ where
         interface: IFACE,
         reset: RESET,
         delay: &mut DELAY,
+        buffer: &'a mut [u8; BUFFER_SIZE],
     ) -> Result<Self, Error<IfaceE, PinE>> {
+
+        assert_eq!(BUFFER_SIZE, buffer.len());
+
         let mut ili9341 = Ili9341 {
             interface,
             reset,
             width: WIDTH,
             height: HEIGHT,
+            buffer
         };
 
         ili9341.hard_reset(delay).map_err(Error::OutputPin)?;
@@ -178,10 +179,6 @@ where
         self.interface.write(cmd as u8, args)
     }
 
-    fn write_iter<I: IntoIterator<Item = u16>>(&mut self, data: I) -> Result<(), IFACE::Error> {
-        self.interface.write_iter(Command::MemoryWrite as u8, data)
-    }
-
     fn set_window(&mut self, x0: u16, y0: u16, x1: u16, y1: u16) -> Result<(), IFACE::Error> {
         self.command(
             Command::ColumnAddressSet,
@@ -202,48 +199,6 @@ where
             ],
         )?;
         Ok(())
-    }
-
-    /// Draw a rectangle on the screen, represented by top-left corner (x0, y0)
-    /// and bottom-right corner (x1, y1).
-    ///
-    /// The border is included.
-    ///
-    /// This method accepts an iterator of rgb565 pixel values.
-    ///
-    /// The iterator is useful to avoid wasting memory by holding a buffer for
-    /// the whole screen when it is not necessary.
-    pub fn draw_iter<I: IntoIterator<Item = u16>>(
-        &mut self,
-        x0: u16,
-        y0: u16,
-        x1: u16,
-        y1: u16,
-        data: I,
-    ) -> Result<(), IFACE::Error> {
-        self.set_window(x0, y0, x1, y1)?;
-        self.write_iter(data)
-    }
-
-    /// Draw a rectangle on the screen, represented by top-left corner (x0, y0)
-    /// and bottom-right corner (x1, y1).
-    ///
-    /// The border is included.
-    ///
-    /// This method accepts a raw buffer of words that will be copied to the screen
-    /// video memory.
-    ///
-    /// The expected format is rgb565.
-    pub fn draw_raw(
-        &mut self,
-        x0: u16,
-        y0: u16,
-        x1: u16,
-        y1: u16,
-        data: &[u16],
-    ) -> Result<(), IFACE::Error> {
-        self.set_window(x0, y0, x1, y1)?;
-        self.write_iter(data.iter().cloned())
     }
 
     /// Change the orientation of the screen
@@ -290,10 +245,40 @@ where
         self.width
     }
 
-    /// Get the current screen heighth. It can change based on the current orientation
+    /// Get the current screen height. It can change based on the current orientation
     pub fn height(&self) -> usize {
         self.height
     }
+
+    /// Set the pixel at coordinates (x,y) to the given color (Rgb565)
+    pub fn set_pixel(&mut self, x: usize, y: usize, color: u16) {
+        if x >= self.width || y >= self.height {
+            return;
+        }
+        let pos_in_buffer: usize = ((y * self.width + x) * 2) as usize;
+        let color_bytes = color.to_be_bytes();
+        self.buffer[pos_in_buffer] = color_bytes[0];
+        self.buffer[pos_in_buffer + 1] = color_bytes[1];
+    }
+
+    /// Set the whole screen to the given color (Rgb565)
+    pub fn fill_screen(&mut self, color: u16) {
+
+        let color_bytes = color.to_be_bytes();
+
+        assert_eq!(BUFFER_SIZE, self.buffer.len());
+
+        for i in 0..BUFFER_SIZE-1 {
+            self.buffer[i] = color_bytes[i%2];
+        }
+    }
+    
+    /// Transfers the current frame from the buffer to the display.
+    pub fn flush(&mut self) -> Result<(), IFACE::Error> {
+        self.set_window(0, 0, self.width as u16, self.height as u16)?;
+        self.interface.write(Command::MemoryWrite as u8, self.buffer)
+    }
+
 }
 
 #[cfg(feature = "graphics")]
